@@ -1,0 +1,19 @@
+# 環境変数・APIキー
+.env
+
+# 銘柄データ（J-Quants APIで各自取得）
+data/stocks.csv
+
+# 出力レポート
+output/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
