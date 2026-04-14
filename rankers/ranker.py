@@ -1,11 +1,13 @@
 """
-スコアリング・ランク付けモジュール
+スコアリング・ランク付けモジュール（多テーマ対応版）
 
-スコア内訳（100点満点）:
-  theme_relevance (50pt) : テーマスコア × 重みで按分
-  mention_count   (20pt) : テーマ内の関連記事数
-  sentiment       (20pt) : ポジティブ報道の割合
-  theme_momentum  (10pt) : テーマが上位に来るほど加算
+スコア計算式:
+  theme_contribution[i] = theme_score[i] × stock_weight[i]
+  weighted_sum           = Σ theme_contribution[i]
+  mention_boost          = 1.0 + 0.2 × tanh(news_mention_score)
+  raw_score              = weighted_sum × mention_boost
+
+  final_score (0-100)    = normalize(raw_score)
 
 星ランク:
   ★★★★★ 80-100
@@ -16,14 +18,13 @@
 """
 import math
 import logging
-from dataclasses import dataclass
-from typing import Optional
+from dataclasses import dataclass, field
 
 import sys, os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 from analyzers.base_analyzer import DetectedTheme, AnalysisResult
 from mappers.stock_mapper import MappedStock
-from config import SCORE_WEIGHTS, get_star
+from config import get_star
 
 logger = logging.getLogger(__name__)
 
@@ -31,10 +32,12 @@ logger = logging.getLogger(__name__)
 @dataclass
 class RankedStock:
     stock: MappedStock
-    score: float        # 0-100
-    stars: int          # 1-5
-    score_detail: dict  # 各スコア内訳
-    reason: str         # 表示用の根拠テキスト
+    score: float                          # 0-100 最終スコア
+    stars: int                            # 1-5
+    theme_contributions: dict[str, float] # theme_name → 貢献スコア
+    primary_theme_score: float            # 主テーマの寄与
+    mention_boost: float                  # ニュース言及ブースト倍率
+    reason: str
 
 
 def rank_stocks(
@@ -43,80 +46,84 @@ def rank_stocks(
     max_results: int = 50,
 ) -> list[RankedStock]:
     """
-    銘柄にスコアを付け、ランク順に並べて返す
-
-    Args:
-        mapped_stocks: mappers.stock_mapper.map_stocks() の結果
-        analysis:      analyzers が生成した AnalysisResult
-        max_results:   上位何件を返すか
+    銘柄を多テーマ重み付きでスコアリングしてランク順に返す
     """
-    # テーマ名 → DetectedTheme の辞書
-    theme_map: dict[str, DetectedTheme] = {t.name: t for t in analysis.themes}
+    theme_score_map: dict[str, float] = {t.name: t.score for t in analysis.themes}
+    theme_sentiment: dict[str, float] = {t.name: t.sentiment for t in analysis.themes}
 
-    # テーマ順位（1位スタート）
-    theme_rank: dict[str, int] = {t.name: i+1 for i, t in enumerate(analysis.themes)}
-    total_themes = max(len(analysis.themes), 1)
-
-    ranked: list[RankedStock] = []
+    raw_scores: list[tuple[MappedStock, float, dict]] = []
 
     for ms in mapped_stocks:
-        theme = theme_map.get(ms.theme_name)
-        if theme is None:
+        contributions: dict[str, float] = {}
+
+        for theme_name, weight in ms.theme_weights.items():
+            t_score = theme_score_map.get(theme_name, 0.0)
+            if t_score <= 0:
+                continue
+            # センチメント補正: -1〜+1 → 0.7〜1.3
+            sent    = theme_sentiment.get(theme_name, 0.0)
+            sent_mult = 1.0 + sent * 0.3
+
+            contributions[theme_name] = t_score * weight * sent_mult
+
+        if not contributions:
             continue
 
-        rank = theme_rank.get(ms.theme_name, total_themes)
+        # 合計スコア
+        weighted_sum = sum(contributions.values())
 
-        # --- 各シグナルのスコア計算 ---
-        # テーマ関連度 (0-50)
-        relevance = theme.score / 100 * SCORE_WEIGHTS["theme_relevance"]
+        # ニュース言及ブースト（tanh で上限を設ける）
+        mention_boost = 1.0 + 0.2 * math.tanh(ms.news_mention_score)
 
-        # 言及数 (0-20): 記事5件以上で満点
-        mention_raw = min(theme.article_count / 5, 1.0)
-        mention = mention_raw * SCORE_WEIGHTS["mention_count"]
+        raw = weighted_sum * mention_boost
+        raw_scores.append((ms, raw, contributions, mention_boost))
 
-        # センチメント (0-20): -1〜+1 → 0〜1 にスケール
-        sent_norm = (theme.sentiment + 1) / 2
-        sentiment = sent_norm * SCORE_WEIGHTS["sentiment"]
+    if not raw_scores:
+        return []
 
-        # テーマ勢い (0-10): 上位テーマほど高得点
-        momentum_norm = 1 - (rank - 1) / total_themes
-        momentum = momentum_norm * SCORE_WEIGHTS["theme_momentum"]
+    # 0-100 に正規化
+    max_raw = max(r[1] for r in raw_scores) or 1.0
+    ranked: list[RankedStock] = []
 
-        total = round(relevance + mention + sentiment + momentum, 1)
-        stars = get_star(total)
+    for ms, raw, contributions, mb in raw_scores:
+        score = round(raw / max_raw * 100, 1)
+        stars = get_star(score)
 
-        detail = {
-            "theme_relevance": round(relevance, 1),
-            "mention_count":   round(mention, 1),
-            "sentiment":       round(sentiment, 1),
-            "theme_momentum":  round(momentum, 1),
-        }
-
-        reason = _build_reason(ms, theme, stars)
+        # 主テーマ（最大寄与テーマ）
+        primary_contrib = max(contributions.values()) if contributions else 0.0
 
         ranked.append(RankedStock(
-            stock        = ms,
-            score        = total,
-            stars        = stars,
-            score_detail = detail,
-            reason       = reason,
+            stock                = ms,
+            score                = score,
+            stars                = stars,
+            theme_contributions  = {k: round(v / max_raw * 100, 1) for k, v in contributions.items()},
+            primary_theme_score  = round(primary_contrib / max_raw * 100, 1),
+            mention_boost        = round(mb, 3),
+            reason               = _build_reason(ms, contributions, theme_score_map, mb),
         ))
 
     ranked.sort(key=lambda r: r.score, reverse=True)
     return ranked[:max_results]
 
 
-def _build_reason(ms: MappedStock, theme: DetectedTheme, stars: int) -> str:
-    sent_label = (
-        "ポジティブ" if theme.sentiment > 0.2
-        else "ネガティブ" if theme.sentiment < -0.2
-        else "中立"
-    )
-    kw_str = "・".join(theme.keywords_found[:3])
-    base = (
-        f"テーマ「{theme.name}」({theme.article_count}件の記事) — "
-        f"センチメント:{sent_label} — キーワード:{kw_str}"
-    )
-    if theme.reason:
-        base += f"\n{theme.reason}"
-    return base
+def _build_reason(
+    ms: MappedStock,
+    contributions: dict[str, float],
+    theme_score_map: dict[str, float],
+    mention_boost: float,
+) -> str:
+    # 寄与上位2テーマを説明
+    top = sorted(contributions.items(), key=lambda x: x[1], reverse=True)[:2]
+    theme_parts = [f"「{t}」(テーマ強度{theme_score_map.get(t, 0):.0f}pt×重み{ms.theme_weights.get(t, 1):.1f})"
+                   for t, _ in top]
+    base = "、".join(theme_parts)
+
+    boost_note = ""
+    if mention_boost > 1.05:
+        boost_note = f" ＋ニュース直接言及ブースト×{mention_boost:.2f}"
+
+    sub_note = ""
+    if ms.sub_themes_hit:
+        sub_note = f" | 小テーマ: {' / '.join(ms.sub_themes_hit[:3])}"
+
+    return f"{base}{boost_note}{sub_note}"

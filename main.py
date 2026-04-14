@@ -86,14 +86,15 @@ def main():
     for i, t in enumerate(analysis.themes[:args.top_themes], 1):
         logger.info(f"    {i}. {t.name} ({t.score:.0f}pt, {t.article_count}件)")
 
-    # 3. 銘柄マッピング
+    # 3. 銘柄マッピング（多テーマ・共起スコア付き）
     logger.info("STEP 3/4 銘柄マッピング")
     stock_df = load_stocks()
     mapped = map_stocks(
-        themes          = analysis.themes,
-        stock_df        = stock_df,
-        top_themes      = args.top_themes,
-        max_stocks_per_theme = args.max_stocks // max(args.top_themes, 1) + 10,
+        themes     = analysis.themes,
+        stock_df   = stock_df,
+        articles   = articles,
+        top_themes = args.top_themes,
+        max_stocks = args.max_stocks,
     )
     logger.info(f"  → {len(mapped)} 銘柄マッピング完了")
 
