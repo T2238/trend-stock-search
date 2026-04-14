@@ -7,19 +7,31 @@ from dataclasses import dataclass, field
 
 
 @dataclass
+class DetectedSubTheme:
+    name: str               # 小テーマ名
+    score: float            # 強度 0-100
+    article_count: int
+    keywords_found: list[str]
+    is_dynamic: bool = False  # True = 動的検知（定義外）
+
+
+@dataclass
 class DetectedTheme:
-    name: str                     # テーマ名 (e.g. "AI・生成AI")
-    score: float                  # テーマの強度 0-100
-    article_count: int            # 関連記事数
-    sentiment: float              # -1.0(悲観) 〜 +1.0(楽観)
-    keywords_found: list[str]     # ヒットしたキーワード
-    reason: str = ""              # 根拠の説明文 (Claude API使用時に詳細化)
+    name: str                         # 大テーマ名
+    score: float                      # 強度 0-100（ソースランク重み込み）
+    raw_score: float                  # ソースランク重み前の生スコア
+    article_count: int
+    sentiment: float                  # -1.0 〜 +1.0
+    keywords_found: list[str]
+    sub_themes: list[DetectedSubTheme] = field(default_factory=list)
+    reason: str = ""
+    top_source_rank: int = 3          # 最高ソースランク（どのメディアに載ったか）
 
 
 @dataclass
 class AnalysisResult:
     themes: list[DetectedTheme] = field(default_factory=list)
-    mode: str = "rule"            # "rule" or "claude"
+    mode: str = "rule"
     analyzed_at: str = ""
 
 

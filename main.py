@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from config import USE_CLAUDE_API, CLAUDE_API_KEY
 from collectors.news_collector import collect_news
+from collectors.sns_collector import collect_sns_trends
 from data.stock_db import load_stocks
 from mappers.stock_mapper import map_stocks
 from rankers.ranker import rank_stocks
@@ -54,6 +55,7 @@ def main():
     parser.add_argument("--hours",       type=int, default=48,   help="対象時間範囲(時間) (default:48)")
     parser.add_argument("--output",      type=str, default=None, help="出力ファイルパス")
     parser.add_argument("--no-browser",  action="store_true",    help="ブラウザを自動で開かない")
+    parser.add_argument("--no-sns",      action="store_true",    help="SNSトレンド収集をスキップ")
     parser.add_argument("--verbose",     action="store_true",    help="詳細ログ")
     args = parser.parse_args()
 
@@ -67,7 +69,14 @@ def main():
     if not articles:
         logger.error("記事を取得できませんでした。ネット接続を確認してください。")
         sys.exit(1)
-    logger.info(f"  → {len(articles)} 記事取得")
+
+    # SNS トレンド（X・Googleトレンド）を追加
+    if not args.no_sns:
+        sns_articles = collect_sns_trends()
+        articles.extend(sns_articles)
+        logger.info(f"  → SNS: {len(sns_articles)} ワード追加")
+
+    logger.info(f"  → 合計 {len(articles)} 記事/ワード")
 
     # 2. テーマ検知
     logger.info("STEP 2/4 テーマ検知")
