@@ -39,7 +39,10 @@ class CorrelationSummary:
 
 
 def _ticker(code: str) -> str:
-    return f"{code}.T"
+    # J-Quants returns 5-char codes (e.g. "72030"); yfinance needs 4-digit "7203.T"
+    # Strip trailing "0" for regular shares; alphanumeric suffix (e.g. "130A0") → keep 4 chars
+    t = code[:4] if len(code) == 5 else code
+    return f"{t}.T"
 
 
 def fetch_returns(

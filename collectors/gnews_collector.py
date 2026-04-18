@@ -25,12 +25,12 @@ logger = logging.getLogger(__name__)
 
 GNEWS_BASE = "https://gnews.io/api/v4/search"
 
-# 投資テーマに関連する検索クエリ（リクエスト数節約のため幅広いクエリに）
+# 投資テーマに関連する検索クエリ（英語メインでGNews日付フィルタと相性が良い）
 GNEWS_QUERIES = [
-    "株式市場 OR 日本株 OR 東証",
-    "AI OR 半導体 OR EV OR 電気自動車",
-    "防衛 OR インバウンド OR 再エネ OR 医薬品",
-    "資源価格 OR 原油 OR 金融 OR フィンテック",
+    "Nikkei OR TSE OR Japan stock market",
+    "AI semiconductor Japan OR EV electric vehicle Japan",
+    "Japan defense OR inbound tourism Japan OR renewable energy Japan",
+    "crude oil Japan OR financial Japan OR fintech Japan",
 ]
 
 
@@ -46,13 +46,11 @@ def _fetch_gnews(
         return []
 
     params = {
-        "q":      query,
-        "lang":   "ja",
-        "country":"jp",
-        "max":    max_results,
-        "from":   from_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "to":     to_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
-        "token":  GNEWS_API_KEY,
+        "q":    query,
+        "max":  max_results,
+        "from": from_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "to":   to_dt.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "token": GNEWS_API_KEY,
     }
 
     try:
