@@ -51,7 +51,7 @@ def fetch_x_trends_japan() -> list[Article]:
 
         now = datetime.now(timezone.utc)
         seen = set()
-        for item in trend_items[:30]:
+        for item in trend_items[:200]:
             word = item.get_text(strip=True)
             if not word or word in seen:
                 continue
@@ -86,7 +86,7 @@ def fetch_google_trends_japan() -> list[Article]:
         feed = feedparser.parse(url)
         now = datetime.now(timezone.utc)
 
-        for entry in feed.entries[:20]:
+        for entry in feed.entries[:50]:
             title = getattr(entry, "title", "") or ""
             if not title:
                 continue
