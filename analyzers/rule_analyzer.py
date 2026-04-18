@@ -79,6 +79,11 @@ class RuleAnalyzer(BaseAnalyzer):
             )
             top_rank = max(a.source_rank for a, _ in hits)
 
+            # ランク別記事数集計
+            rank_breakdown: dict[int, int] = {}
+            for a, _ in hits:
+                rank_breakdown[a.source_rank] = rank_breakdown.get(a.source_rank, 0) + 1
+
             # 小テーマ検知（定義済み）
             sub_themes = self._detect_sub_themes(
                 theme_name, theme_def, [a for a, _ in hits]
@@ -100,6 +105,7 @@ class RuleAnalyzer(BaseAnalyzer):
                 sub_themes     = sorted(sub_themes, key=lambda s: s.score, reverse=True),
                 top_source_rank= top_rank,
                 reason         = self._build_reason(theme_name, hits, sentiment, top_rank),
+                rank_breakdown = rank_breakdown,
             ))
 
         # スコアを 0-100 に正規化

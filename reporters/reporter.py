@@ -53,6 +53,30 @@ def _theme_tags_html(theme_contributions: dict, theme_color_map: dict) -> str:
     return "".join(tags)
 
 
+def _rank_breakdown_html(rank_breakdown: dict) -> str:
+    """ランク別記事数をミニバーで表示"""
+    if not rank_breakdown:
+        return ""
+    total = sum(rank_breakdown.values())
+    rank_colors = {5: "#dc3545", 4: "#ffc107", 3: "#0dcaf0", 2: "#6c757d", 1: "#212529"}
+    rank_labels = {5: "R5", 4: "R4", 3: "R3", 2: "R2", 1: "R1"}
+    bars = ""
+    for rank in sorted(rank_breakdown.keys(), reverse=True):
+        cnt = rank_breakdown[rank]
+        pct = cnt / total * 100
+        color = rank_colors.get(rank, "#aaa")
+        label = rank_labels.get(rank, f"R{rank}")
+        bars += (f'<span title="ランク{rank}: {cnt}件" style="display:inline-block;'
+                 f'width:{pct:.0f}%;background:{color};height:8px;"></span>')
+    badges = " ".join(
+        '<span style="font-size:0.7em;color:{};">R{}:{}</span>'.format(
+            rank_colors.get(r, "#aaa"), r, rank_breakdown[r]
+        )
+        for r in sorted(rank_breakdown.keys(), reverse=True)
+    )
+    return f'<div class="mt-1"><div style="display:flex;border-radius:3px;overflow:hidden;height:8px;">{bars}</div><div class="mt-1">{badges}</div></div>'
+
+
 def _sub_themes_html(sub_themes, is_dynamic_set=None):
     if not sub_themes:
         return ""
@@ -148,6 +172,8 @@ def generate_report(
 
     theme_color_map = {t.name: _THEME_COLORS[i % len(_THEME_COLORS)]
                        for i, t in enumerate(analysis.themes)}
+    # テーマ名 → top_source_rank マップ（銘柄の最高ランク算出用）
+    theme_rank_map = {t.name: t.top_source_rank for t in analysis.themes}
 
     # --- テーマカード ---
     theme_cards_html = ""
@@ -157,20 +183,22 @@ def generate_report(
             for kw in theme.keywords_found[:6]
         )
         src_color, src_label = SOURCE_RANK_META.get(theme.top_source_rank, ("secondary", "不明"))
+        rank_bar = _rank_breakdown_html(getattr(theme, "rank_breakdown", {}))
         theme_cards_html += f"""
         <div class="col-md-6 col-lg-4 mb-3">
           <div class="card h-100 shadow-sm">
             <div class="card-header d-flex justify-content-between align-items-center py-2">
               <strong>{theme.name}</strong>
               <div>
-                <span class="badge bg-{src_color} me-1" title="{src_label}">情報源ランク{theme.top_source_rank}</span>
+                <span class="badge bg-{src_color} me-1" title="{src_label}">最高R{theme.top_source_rank}</span>
                 <span class="badge bg-primary">{theme.score:.0f}pt</span>
               </div>
             </div>
             <div class="card-body py-2">
               {_sentiment_bar(theme.sentiment)}
               <small class="text-muted d-block mb-1">記事数: {theme.article_count}件</small>
-              <div>{kw_badges}</div>
+              {rank_bar}
+              <div class="mt-1">{kw_badges}</div>
               {_sub_themes_html(theme.sub_themes)}
               {f'<p class="card-text mt-2 small text-secondary">{theme.reason}</p>' if theme.reason else ''}
             </div>
@@ -190,6 +218,15 @@ def generate_report(
         badge_cls = f"badge {MARKET_BADGE_CLASS.get(ms.market_badge, 'bg-secondary')}"
         theme_tags = _theme_tags_html(rs.theme_contributions, theme_color_map)
 
+        # 銘柄の最高ソースランク（関連テーマのうち最大）
+        stock_top_rank = max(
+            (theme_rank_map.get(t, 1) for t in rs.theme_contributions),
+            default=1,
+        )
+        rank_color = {5: "#dc3545", 4: "#ffc107", 3: "#0dcaf0", 2: "#6c757d", 1: "#212529"}.get(stock_top_rank, "#aaa")
+        rank_badge = (f'<span class="badge ms-1" style="background:{rank_color};font-size:0.7em;" '
+                      f'title="最高言及ランク">R{stock_top_rank}</span>')
+
         mention_badge = ""
         if rs.mention_boost > 1.05:
             mention_badge = f'<span class="badge bg-warning text-dark ms-1" title="ニュース直接言及">📰×{rs.mention_boost:.2f}</span>'
@@ -202,12 +239,12 @@ def generate_report(
         price_cells = _price_return_cells(ms.code, price_data) if has_price else ""
 
         stock_rows_html += f"""
-        <tr>
+        <tr class="stock-row" data-top-rank="{stock_top_rank}">
           <td class="text-center fw-bold">{pos}</td>
           <td>
             <span class="{badge_cls} me-1">{ms.market_badge}</span>
             <strong>{ms.code}</strong> {ms.name}
-            {mention_badge}{sub_badge}
+            {rank_badge}{mention_badge}{sub_badge}
           </td>
           <td><small class="text-muted">{ms.market_name}</small></td>
           <td><small class="text-muted">{ms.sector33_name}</small></td>
@@ -268,8 +305,17 @@ def generate_report(
     🏆 関連銘柄ランキング（上位{len(ranked_stocks)}社）
     <small class="text-muted fw-normal fs-6"> — 複数テーマタグ付き・スコアにカーソルで根拠表示</small>
   </h2>
+  <div class="mb-2 d-flex align-items-center gap-2 flex-wrap">
+    <small class="text-muted me-1">情報源ランクでフィルター:</small>
+    <button class="btn btn-sm btn-outline-secondary rank-filter active" data-min-rank="1">全て</button>
+    <button class="btn btn-sm rank-filter" data-min-rank="4"
+      style="border-color:#ffc107;color:#856404;">R4以上（経済誌↑）</button>
+    <button class="btn btn-sm rank-filter" data-min-rank="5"
+      style="border-color:#dc3545;color:#dc3545;">R5のみ（日経・Reuters・Bloomberg）</button>
+    <span id="rank-filter-count" class="text-muted small ms-2"></span>
+  </div>
   <div class="table-responsive" style="max-height:75vh;overflow-y:auto;">
-    <table class="table table-hover table-sm align-middle">
+    <table class="table table-hover table-sm align-middle" id="stock-table">
       <thead>
         <tr>
           <th style="width:35px">#</th>
@@ -297,6 +343,41 @@ def generate_report(
   </div>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+(function() {{
+  var minRank = 1;
+  function applyFilter() {{
+    var rows = document.querySelectorAll('#stock-table .stock-row');
+    var visible = 0;
+    rows.forEach(function(row) {{
+      var rank = parseInt(row.getAttribute('data-top-rank') || '1');
+      var show = rank >= minRank;
+      row.style.display = show ? '' : 'none';
+      if (show) visible++;
+    }});
+    var countEl = document.getElementById('rank-filter-count');
+    if (countEl) countEl.textContent = visible + '件表示';
+  }}
+  document.querySelectorAll('.rank-filter').forEach(function(btn) {{
+    btn.addEventListener('click', function() {{
+      document.querySelectorAll('.rank-filter').forEach(function(b) {{
+        b.classList.remove('active','btn-secondary','btn-warning','btn-danger');
+        b.classList.add('btn-outline-secondary');
+        b.style.backgroundColor = '';
+        b.style.color = b.getAttribute('data-min-rank') == '4' ? '#856404'
+                      : b.getAttribute('data-min-rank') == '5' ? '#dc3545' : '';
+      }});
+      minRank = parseInt(this.getAttribute('data-min-rank'));
+      this.classList.remove('btn-outline-secondary');
+      this.classList.add('active');
+      this.style.backgroundColor = minRank >= 5 ? '#dc3545' : minRank >= 4 ? '#ffc107' : '#6c757d';
+      this.style.color = '#fff';
+      applyFilter();
+    }});
+  }});
+  applyFilter();
+}})();
+</script>
 </body>
 </html>"""
 
