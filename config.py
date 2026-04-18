@@ -37,21 +37,29 @@ PRICE_TOP_N_STOCKS = 30             # 上位何銘柄の株価を取得するか
 # ランク 1: SNSトレンド（0.5倍、早期シグナル）
 
 RSS_FEEDS: list[tuple[str, str, int]] = [
-    # --- ランク5: 一次金融メディア ---
-    ("https://www.nikkei.com/rss/index.rdf",
-     "日経電子版", 5),
-    ("https://feeds.reuters.com/reuters/JPBusinessNews",
+    # --- ランク5: 一次金融メディア (rss.wor.jp 経由) ---
+    ("https://assets.wor.jp/rss/rdf/nikkei/economy.rdf",
+     "日経 経済", 5),
+    ("https://assets.wor.jp/rss/rdf/nikkei/news.rdf",
+     "日経 総合", 5),
+    ("https://assets.wor.jp/rss/rdf/reuters/top.rdf",
      "Reuters Japan", 5),
+    ("https://assets.wor.jp/rss/rdf/bloomberg/markets.rdf",
+     "Bloomberg マーケット", 5),
+    ("https://assets.wor.jp/rss/rdf/bloomberg/finance.rdf",
+     "Bloomberg 金融", 5),
 
     # --- ランク4: 大手メディア・経済誌 ---
+    ("https://assets.wor.jp/rss/rdf/nikkei/business.rdf",
+     "日経 ビジネス", 4),
+    ("https://business.nikkei.com/rss/sns/nb.rdf",
+     "日経ビジネス電子版", 4),
     ("https://www3.nhk.or.jp/rss/news/cat5.xml",
      "NHK 経済", 4),
     ("https://toyokeizai.net/list/feed/rss",
      "東洋経済オンライン", 4),
     ("https://diamond.jp/list/feed/rss",
      "ダイヤモンド・オンライン", 4),
-    ("https://president.jp/list/feed/rss",
-     "プレジデントオンライン", 4),
 
     # --- ランク3: 株式専門・ニュース集約 ---
     ("https://news.yahoo.co.jp/rss/topics/business.xml",
