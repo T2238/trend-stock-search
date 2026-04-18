@@ -15,6 +15,20 @@ CLAUDE_MODEL = "claude-sonnet-4-6"
 # --- J-Quants API V2 (銘柄リスト取得用) ---
 JQUANTS_API_KEY = os.getenv("JQUANTS_API_KEY", "")
 
+# --- GNews API (過去記事取得用) ---
+# https://gnews.io で無料登録（100リクエスト/日）
+GNEWS_API_KEY = os.getenv("GNEWS_API_KEY", "")
+
+# --- 履歴保存 ---
+STORAGE_DIR = os.path.join(os.path.dirname(__file__), "storage", "history")
+HISTORY_KEEP_DAYS = 90  # 何日分保持するか
+
+# --- 株価取得 ---
+# yfinance: 東証銘柄は "7203.T" 形式
+PRICE_BENCHMARK_TICKER = "1306.T"   # TOPIX ETF（ベンチマーク）
+PRICE_RETURN_DAYS = [1, 5, 20]      # リターン計算日数
+PRICE_TOP_N_STOCKS = 30             # 上位何銘柄の株価を取得するか
+
 # --- ニュース収集（情報源ランク付き）---
 # ランク 5: 一次金融メディア（スコア重み 2.0倍）
 # ランク 4: 大手メディア・経済誌（1.5倍）

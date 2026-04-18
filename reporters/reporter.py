@@ -1,6 +1,7 @@
 """
 HTML レポート生成モジュール
 大テーマ → 小テーマ → 銘柄（多テーマタグ付き）を表示
+トレンド変化・株価リターンセクション追加
 """
 import os
 import logging
@@ -19,9 +20,16 @@ STAR_COLOR = {5: "#ff6b00", 4: "#ff9500", 3: "#ffc107", 2: "#6c757d", 1: "#adb5b
 SOURCE_RANK_META = {5: ("danger", "一次金融"), 4: ("warning", "経済誌"), 3: ("info", "株専門"),
                     2: ("secondary", "業界紙"), 1: ("dark", "SNS")}
 
-# テーマごとのバッジ色（循環）
 _THEME_COLORS = ["primary", "success", "danger", "warning text-dark", "info text-dark",
                  "secondary", "dark", "primary", "success", "danger", "warning text-dark", "info text-dark"]
+
+_CHANGE_TYPE_BADGE = {
+    "new":         ("success",   "🆕 新規"),
+    "rising":      ("danger",    "↑ 急上昇"),
+    "stable":      ("secondary", "→ 安定"),
+    "falling":     ("warning",   "↓ 急落"),
+    "disappeared": ("dark",      "💨 消滅"),
+}
 
 
 def _stars_html(n):
@@ -38,7 +46,6 @@ def _sentiment_bar(s):
 
 
 def _theme_tags_html(theme_contributions: dict, theme_color_map: dict) -> str:
-    """銘柄行に複数テーマタグを表示"""
     tags = []
     for t_name, contrib in sorted(theme_contributions.items(), key=lambda x: x[1], reverse=True):
         color = theme_color_map.get(t_name, "secondary")
@@ -60,9 +67,75 @@ def _sub_themes_html(sub_themes, is_dynamic_set=None):
     return '<div class="mt-1">' + "".join(items) + "</div>"
 
 
+def _fmt_return(v):
+    """リターン値をカラー付きHTML文字列に変換"""
+    if v is None:
+        return '<span class="text-muted">-</span>'
+    color = "text-success" if v > 0 else "text-danger"
+    return f'<span class="{color}">{v*100:+.1f}%</span>'
+
+
+def _trend_watch_section(watch_result) -> str:
+    """トレンド変化セクションのHTML"""
+    if watch_result is None or not watch_result.has_history:
+        return ""
+
+    rows = ""
+    for tc in watch_result.theme_changes:
+        badge_color, badge_label = _CHANGE_TYPE_BADGE.get(tc.change_type, ("secondary", tc.change_type))
+        score_delta_html = ""
+        if tc.score_delta is not None:
+            color = "text-success" if tc.score_delta > 0 else "text-danger"
+            score_delta_html = f'<span class="{color}">{tc.score_delta:+.0f}</span>'
+        rank_delta_html = ""
+        if tc.rank_delta is not None:
+            color = "text-success" if tc.rank_delta < 0 else "text-danger"
+            rank_delta_html = f'<span class="{color}">{tc.rank_delta:+d}</span>'
+
+        rows += f"""
+        <tr>
+          <td><span class="badge bg-{badge_color}">{badge_label}</span></td>
+          <td><strong>{tc.name}</strong></td>
+          <td class="text-center">{tc.current_score:.0f}pt</td>
+          <td class="text-center">{score_delta_html}</td>
+          <td class="text-center">{tc.current_rank or '-'}</td>
+          <td class="text-center">{rank_delta_html}</td>
+        </tr>"""
+
+    prev_label = f"前回: {watch_result.prev_date}" if watch_result.prev_date else ""
+    return f"""
+  <h2 class="h5 mb-3 border-bottom pb-2 mt-4">📊 トレンド変化 <small class="text-muted fw-normal fs-6">{prev_label}</small></h2>
+  <div class="table-responsive mb-4">
+    <table class="table table-sm table-hover align-middle">
+      <thead class="table-dark">
+        <tr>
+          <th>変化</th><th>テーマ</th>
+          <th class="text-center">現スコア</th>
+          <th class="text-center">Δスコア</th>
+          <th class="text-center">現順位</th>
+          <th class="text-center">Δ順位</th>
+        </tr>
+      </thead>
+      <tbody>{rows}</tbody>
+    </table>
+  </div>"""
+
+
+def _price_return_cells(code: str, price_data: dict) -> str:
+    """銘柄コードに対応する株価リターンのTDセルHTML"""
+    if not price_data or code not in price_data:
+        return '<td class="text-center text-muted">-</td><td class="text-center text-muted">-</td><td class="text-center text-muted">-</td>'
+    excess = price_data[code].get("excess", {})
+    return (f'<td class="text-center">{_fmt_return(excess.get("1d"))}</td>'
+            f'<td class="text-center">{_fmt_return(excess.get("5d"))}</td>'
+            f'<td class="text-center">{_fmt_return(excess.get("20d"))}</td>')
+
+
 def generate_report(
     ranked_stocks: list[RankedStock],
     analysis: AnalysisResult,
+    watch_result=None,
+    price_data: dict | None = None,
     output_path: str | None = None,
 ) -> str:
     if output_path is None:
@@ -73,7 +146,6 @@ def generate_report(
     mode_label = "Claude AI 高精度モード" if analysis.mode == "claude" else "ルールベースモード"
     mode_badge = "bg-info" if analysis.mode == "claude" else "bg-secondary"
 
-    # テーマ → 色マップ
     theme_color_map = {t.name: _THEME_COLORS[i % len(_THEME_COLORS)]
                        for i, t in enumerate(analysis.themes)}
 
@@ -106,23 +178,29 @@ def generate_report(
         </div>"""
 
     # --- 銘柄テーブル ---
+    has_price = bool(price_data)
+    price_headers = """
+          <th class="text-center" title="TOPIX超過リターン 1日後">1d超過</th>
+          <th class="text-center" title="TOPIX超過リターン 5日後">5d超過</th>
+          <th class="text-center" title="TOPIX超過リターン 20日後">20d超過</th>""" if has_price else ""
+
     stock_rows_html = ""
     for pos, rs in enumerate(ranked_stocks, 1):
         ms = rs.stock
         badge_cls = f"badge {MARKET_BADGE_CLASS.get(ms.market_badge, 'bg-secondary')}"
         theme_tags = _theme_tags_html(rs.theme_contributions, theme_color_map)
 
-        # ニュース言及バッジ
         mention_badge = ""
         if rs.mention_boost > 1.05:
             mention_badge = f'<span class="badge bg-warning text-dark ms-1" title="ニュース直接言及">📰×{rs.mention_boost:.2f}</span>'
 
-        # 小テーマバッジ
         sub_badge = ""
         if ms.sub_themes_hit:
             sub_badge = f'<br><small class="text-muted">{" / ".join(ms.sub_themes_hit[:3])}</small>'
 
         tooltip = rs.reason.replace('"', "'")
+        price_cells = _price_return_cells(ms.code, price_data) if has_price else ""
+
         stock_rows_html += f"""
         <tr>
           <td class="text-center fw-bold">{pos}</td>
@@ -138,7 +216,11 @@ def generate_report(
             <span class="badge bg-dark">{rs.score:.1f}</span>
           </td>
           <td style="max-width:250px;">{theme_tags}</td>
+          {price_cells}
         </tr>"""
+
+    # --- トレンド変化セクション ---
+    watch_section_html = _trend_watch_section(watch_result)
 
     html = f"""<!DOCTYPE html>
 <html lang="ja">
@@ -180,6 +262,8 @@ def generate_report(
   <h2 class="h5 mb-3 border-bottom pb-2">🔍 検知されたトレンドテーマ</h2>
   <div class="row">{theme_cards_html}</div>
 
+  {watch_section_html}
+
   <h2 class="h5 mb-3 border-bottom pb-2 mt-4">
     🏆 関連銘柄ランキング（上位{len(ranked_stocks)}社）
     <small class="text-muted fw-normal fs-6"> — 複数テーマタグ付き・スコアにカーソルで根拠表示</small>
@@ -195,6 +279,7 @@ def generate_report(
           <th>評価</th>
           <th style="width:55px">スコア</th>
           <th>テーマ（重み順）</th>
+          {price_headers}
         </tr>
       </thead>
       <tbody>{stock_rows_html}</tbody>
@@ -207,6 +292,7 @@ def generate_report(
       <span class="badge bg-primary">P</span>プライム &nbsp;
       <span class="badge bg-success">S</span>スタンダード &nbsp;
       <span class="badge bg-warning text-dark">G</span>グロース
+      {' &nbsp;|&nbsp; <strong>超過リターン:</strong> TOPIX(1306.T)比' if has_price else ''}
     </div>
   </div>
 </div>

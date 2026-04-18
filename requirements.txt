@@ -4,4 +4,5 @@ beautifulsoup4>=4.12
 lxml>=5.0
 pandas>=2.0
 python-dotenv>=1.0
+yfinance>=0.2          # 株価取得
 anthropic>=0.40        # Claude API (オプション: APIキーがある場合のみ使用)
