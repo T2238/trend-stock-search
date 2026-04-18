@@ -164,7 +164,7 @@ def run_normal(args):
     _print_preview(ranked, analysis, watch_result)
 
     # HTMLレポート生成
-    path = generate_report(ranked, analysis, watch_result, price_data, args.output)
+    path = generate_report(ranked, analysis, watch_result, price_data, args.output, articles=articles)
     print(f"\nレポート: {path}")
     if not args.no_browser:
         webbrowser.open(f"file:///{path.replace(os.sep, '/')}")
